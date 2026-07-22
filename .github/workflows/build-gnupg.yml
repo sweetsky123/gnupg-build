@@ -216,8 +216,9 @@ jobs:
                 [mpr.dll]=1 [msvcrt.dll]=1 [ncrypt.dll]=1
                 [netapi32.dll]=1 [ntdll.dll]=1 [ole32.dll]=1
                 [oleacc.dll]=1 [oleaut32.dll]=1 [psapi.dll]=1
-                [rpcrt4.dll]=1 [secur32.dll]=1 [setupapi.dll]=1
-                [shell32.dll]=1 [shlwapi.dll]=1 [user32.dll]=1
+                [rpcrt4.dll]=1 [secur32.dll]=1 [security.dll]=1
+                [setupapi.dll]=1 [shell32.dll]=1 [shlwapi.dll]=1
+                [user32.dll]=1
                 [userenv.dll]=1 [version.dll]=1 [winhttp.dll]=1
                 [wininet.dll]=1 [winmm.dll]=1 [wldap32.dll]=1
                 [ws2_32.dll]=1
