@@ -176,10 +176,24 @@ jobs:
                 > config.mk
               echo "=== 已写入 Windows 完全静态依赖配置 ==="
             fi
+            BUILD_LOG="${RUNNER_TEMP}/gnupg-build-${{ matrix.config.name }}.log"
             make -f build-aux/speedo.mk \
               TARGETOS=w32 WHAT=release UPD_SWDB=1 ${STATIC_FLAG} \
               W32VERSION=${{ matrix.config.w32version }} \
-              all
+              all 2>&1 | tee "${BUILD_LOG}"
+            test "${PIPESTATUS[0]}" -eq 0
+            if [ "${{ matrix.config.static }}" = "1" ]; then
+              if grep -Fq 'Building without SQLite support - TOFU and Keyboxd disabled' "${BUILD_LOG}"; then
+                echo "ERROR: configure 禁用了 SQLite/keyboxd"
+                exit 1
+              fi
+              if ! grep -Eq '^[[:space:]]*Keyboxd:[[:space:]]+yes[[:space:]]*$' "${BUILD_LOG}"; then
+                echo "ERROR: configure summary 未确认 Keyboxd: yes"
+                grep -E 'SQLite|Keyboxd|TOFU' "${BUILD_LOG}" || true
+                exit 1
+              fi
+              echo "SQLite/keyboxd configure 检查通过"
+            fi
           else
             echo "=== Linux 静态编译 ==="
             make -f build-aux/speedo.mk native STATIC=1 \
@@ -196,7 +210,47 @@ jobs:
           fi
           echo "构建产物列表:"
           if [ "${{ matrix.config.targetos }}" = "w32" ]; then
-            find "${INST_DIR}/bin" -type f | sort
+            find "${INST_DIR}/bin" "${INST_DIR}/libexec" -type f 2>/dev/null | sort
+            if [ "${{ matrix.config.static }}" = "1" ]; then
+              mapfile -t INSTALLED_EXE_REL < <(
+                find "${INST_DIR}" -type f -iname '*.exe' \
+                  \( -path "${INST_DIR}/bin/*" -o -path "${INST_DIR}/libexec/*" \) \
+                  -printf '%P\n' | sort -u
+              )
+              if [ "${#INSTALLED_EXE_REL[@]}" -eq 0 ]; then
+                echo "ERROR: 源码构建没有安装任何 Windows executable"
+                exit 1
+              fi
+              printf '%s\n' "${INSTALLED_EXE_REL[@]}" > "${RUNNER_TEMP}/installed-exe.txt"
+              if ! grep -Fxq 'libexec/keyboxd.exe' "${RUNNER_TEMP}/installed-exe.txt"; then
+                echo "ERROR: 源码构建必须将 keyboxd.exe 安装到 libexec/；实际 executable 清单为:"
+                cat "${RUNNER_TEMP}/installed-exe.txt"
+                exit 1
+              fi
+              REQUIRED_EXE_NAMES=(
+                gpg.exe gpgv.exe gpgsm.exe gpg-agent.exe dirmngr.exe
+                gpgconf.exe gpg-connect-agent.exe gpg-card.exe gpgtar.exe
+                pinentry-w32.exe
+              )
+              for required_exe in "${REQUIRED_EXE_NAMES[@]}"; do
+                if ! awk -v required="${required_exe}" '
+                  BEGIN { found = 0 }
+                  { name = $0; sub(/^.*\//, "", name); if (tolower(name) == tolower(required)) found = 1 }
+                  END { exit(found ? 0 : 1) }
+                ' "${RUNNER_TEMP}/installed-exe.txt"; then
+                  echo "ERROR: 缺少 Windows 核心组件 ${required_exe}"
+                  cat "${RUNNER_TEMP}/installed-exe.txt"
+                  exit 1
+                fi
+              done
+              if find "${INST_DIR}" -type f -iname '*.dll' 2>/dev/null | grep -q .; then
+                echo "ERROR: Windows static build produced a DLL"
+                find "${INST_DIR}" -type f -iname '*.dll' -print
+                exit 1
+              fi
+              echo "Windows static executable 清单 (${#INSTALLED_EXE_REL[@]} 个):"
+              cat "${RUNNER_TEMP}/installed-exe.txt"
+            fi
           else
             find "${INST_DIR}/bin" -type f -executable | sort
           fi
@@ -236,7 +290,7 @@ jobs:
                     exit 1
                   fi
                 done <<< "${imports}"
-              done < <(find "${INST_DIR}/bin" -maxdepth 1 -type f -iname '*.exe' | sort)
+              done < <(find "${INST_DIR}" -type f -iname '*.exe' 2>/dev/null | sort)
               echo "Windows static PE 导入检查通过: 仅包含 Windows 系统 DLL"
             else
               echo "(Windows 交叉编译产物, 跳过本地运行测试)"
@@ -256,17 +310,100 @@ jobs:
           mkdir -p "${ARTIFACT}/bin"
 
           if [ "${{ matrix.config.targetos }}" = "w32" ]; then
+            runtime_destinations() {
+              local rel="$1"
+              local name="${rel##*/}"
+
+              case "${rel}" in
+                bin/*) printf '%s\n' "${rel}" ;;
+                libexec/*) printf 'bin/%s\n' "${name}" ;;
+                *)
+                  echo "ERROR: 不支持的 Windows executable 安装路径: ${rel}" >&2
+                  return 1
+                  ;;
+              esac
+
+              case "${name}" in
+                gpg-agent.exe) printf '%s\n' 'bin/agent/gpg-agent.exe' ;;
+                scdaemon.exe) printf '%s\n' 'bin/scd/scdaemon.exe' ;;
+                keyboxd.exe) printf '%s\n' 'bin/kbx/keyboxd.exe' ;;
+                dirmngr.exe) printf '%s\n' 'bin/dirmngr/dirmngr.exe' ;;
+                dirmngr_ldap.exe) printf '%s\n' 'bin/dirmngr/dirmngr_ldap.exe' ;;
+                gpg-check-pattern.exe) printf '%s\n' 'bin/tools/gpg-check-pattern.exe' ;;
+                gpg-connect-agent.exe) printf '%s\n' 'bin/tools/gpg-connect-agent.exe' ;;
+                gpgconf.exe) printf '%s\n' 'bin/tools/gpgconf.exe' ;;
+                gpg-card.exe) printf '%s\n' 'bin/tools/gpg-card.exe' ;;
+                gpgtar.exe) printf '%s\n' 'bin/tools/gpgtar.exe' ;;
+                gpgsm.exe) printf '%s\n' 'bin/sm/gpgsm.exe' ;;
+                gpg.exe) printf '%s\n' 'bin/g10/gpg.exe' ;;
+                gpgv.exe) printf '%s\n' 'bin/g10/gpgv.exe' ;;
+                pinentry-w32.exe) printf '%s\n' 'bin/pinentry-basic.exe' ;;
+              esac
+            }
+
             if [ "${{ matrix.config.static }}" = "1" ]; then
-              if find "${INST_DIR}/bin" -maxdepth 1 -type f -iname '*.dll' | grep -q .; then
-                echo "ERROR: Windows static build produced a DLL"
-                find "${INST_DIR}/bin" -maxdepth 1 -type f -iname '*.dll' -print
+              mapfile -t INSTALLED_EXE < <(
+                find "${INST_DIR}/bin" "${INST_DIR}/libexec" -type f -iname '*.exe' | sort
+              )
+              if [ "${#INSTALLED_EXE[@]}" -eq 0 ]; then
+                echo "ERROR: 源码构建没有安装任何 Windows executable"
                 exit 1
               fi
-              find "${INST_DIR}/bin" -maxdepth 1 -type f -iname '*.exe' -exec cp {} "${ARTIFACT}/bin/" \;
+              for exe in "${INSTALLED_EXE[@]}"; do
+                rel="${exe#${INST_DIR}/}"
+                while IFS= read -r dest_rel; do
+                  mkdir -p "${ARTIFACT}/$(dirname "${dest_rel}")"
+                  cp "${exe}" "${ARTIFACT}/${dest_rel}"
+                done < <(runtime_destinations "${rel}")
+              done
+
+              mapfile -t PACKAGED_EXE_REL < <(
+                find "${ARTIFACT}" -type f -iname '*.exe' \
+                  -printf '%P\n' | sort -u
+              )
+              mapfile -t EXPECTED_EXE_REL < <(
+                while IFS= read -r rel; do
+                  runtime_destinations "${rel}"
+                done < <(find "${INST_DIR}" -type f -iname '*.exe' \
+                  \( -path "${INST_DIR}/bin/*" -o -path "${INST_DIR}/libexec/*" \) \
+                  -printf '%P\n' | sort -u)
+              )
+              printf '%s\n' "${EXPECTED_EXE_REL[@]}" | sort -u > "${ARTIFACT}.expected-exe.txt"
+              printf '%s\n' "${PACKAGED_EXE_REL[@]}" | sort -u > "${ARTIFACT}.packaged-exe.txt"
+              if ! diff -u "${ARTIFACT}.expected-exe.txt" "${ARTIFACT}.packaged-exe.txt"; then
+                echo "ERROR: 安装树与 static artifact 的 executable 清单不一致"
+                exit 1
+              fi
+              if find "${ARTIFACT}" -type f ! -iname '*.exe' 2>/dev/null | grep -q .; then
+                echo "ERROR: Windows static artifact 包含非 exe 文件"
+                find "${ARTIFACT}" -type f ! -iname '*.exe' -print
+                exit 1
+              fi
+              rm -f "${ARTIFACT}.expected-exe.txt" "${ARTIFACT}.packaged-exe.txt"
               echo "Windows static 产物 (仅 exe):"
             else
-              cp "${INST_DIR}/bin/"* "${ARTIFACT}/bin/" 2>/dev/null || true
-              echo "Windows 产物 (含 DLL):"
+              cp -a "${INST_DIR}/." "${ARTIFACT}/"
+              mapfile -t INSTALLED_RUNTIME_EXE < <(
+                find "${INST_DIR}/bin" "${INST_DIR}/libexec" -type f -iname '*.exe' | sort
+              )
+              for exe in "${INSTALLED_RUNTIME_EXE[@]}"; do
+                rel="${exe#${INST_DIR}/}"
+                while IFS= read -r dest_rel; do
+                  mkdir -p "${ARTIFACT}/$(dirname "${dest_rel}")"
+                  cp "${exe}" "${ARTIFACT}/${dest_rel}"
+                done < <(runtime_destinations "${rel}")
+              done
+              mapfile -t MISSING_DYNAMIC_FILES < <(
+                comm -23 \
+                  <(find "${INST_DIR}" -type f -printf '%P\n' | sort) \
+                  <(find "${ARTIFACT}" -type f -printf '%P\n' | sort)
+              )
+              if [ "${#MISSING_DYNAMIC_FILES[@]}" -ne 0 ]; then
+                echo "ERROR: dynamic artifact 缺少安装树文件:"
+                printf '%s\n' "${MISSING_DYNAMIC_FILES[@]}"
+                exit 1
+              fi
+              echo "Windows 产物 (递归包含完整安装树和 helper 路径):"
             fi
             ls -lh "${ARTIFACT}/bin/"
             cd "${ARTIFACT}" && zip -9qr "${GITHUB_WORKSPACE}/${ARTIFACT}.zip" .
