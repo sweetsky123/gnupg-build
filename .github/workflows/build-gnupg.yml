@@ -762,50 +762,40 @@ jobs:
           body: |
             ## 中文
 
-            通过 GitHub Actions 自动从 GnuPG 官网抓取源码并完成构建。编译使用的源码文件已通过 GnuPG 官方发布的签名校验。
+            从 GnuPG 官网下载源码，验证官方签名后自动构建。
 
+            ### Release 包含
 
-            每个构建产物均附带：
-            - **SHA256SUMS** — SHA-256 校验和清单（用于验证文件完整性）
-            - **build-manifest.json** — 构建清单（版本、平台、构建参数）
-            - **SLSA Provenance** — 通过 `attest-build-provenance` 生成的构建来源证明
+            | 文件 | 说明 |
+            |---|---|
+            | `SHA256SUMS` | 全部产物的 SHA-256 校验和（已签名） |
+            | `SHA256SUMS.sig` | SHA256SUMS 的 GPG 分离签名 |
+            | `gnupg-ci-release-key.asc` | CI 签名公钥（指纹: `1F3451...205CC1`） |
+            | `release-manifest.json` | 版本、构建日期、产物清单 |
+            | `gnupg-linux-amd64.tar.xz` + `.deb` | Linux x86_64 静态二进制 |
+            | `gnupg-linux-arm64.tar.xz` + `.deb` | Linux ARM64 静态二进制 |
+            | `gnupg-windows-w64.zip` | Windows 64-bit（exe + DLL） |
+            | `gnupg-windows-w64-static.zip` | Windows 64-bit 全静态（仅 exe） |
 
-            ### 包含文件
-            - **gpg** — GnuPG 核心加密工具
-            - **gpg-agent** — GPG 代理（私钥缓存）
-            - **gpgconf** — 配置工具
-            - **gpgsm** — S/MIME 支持
-            - **gpgv** — 签名验证工具
-            - **gpgtar** — 加密归档工具
-            - **gpg-card** — OpenPGP 卡片管理
-            - **dirmngr** — 证书目录管理器
-            - **keyboxd** — 密钥盒守护进程
+            每个构建构件（`gnupg-*.tar.xz`/`.deb`/`.zip`）还附带该构件自身的 `SHA256SUMS` 和 `build-manifest.json`。
 
-            ### 构建平台
-            | 文件名 | 架构 | 类型 |
-            |---|---|---|
-            | gnupg-linux-amd64.tar.xz | Linux x86_64 | 静态二进制 tar.xz |
-            | gnupg-linux-amd64.deb | Linux x86_64 | Debian/Ubuntu .deb 包 |
-            | gnupg-linux-arm64.tar.xz | Linux ARM64 | 静态二进制 tar.xz |
-            | gnupg-linux-arm64.deb | Linux ARM64 | Debian/Ubuntu .deb 包 |
-            | gnupg-windows-w64.zip | Windows 64-bit | .exe + DLL |
-            | gnupg-windows-w64-static.zip | Windows 64-bit | 第三方依赖静态链接（仅 exe） |
-
-            ### 验证方法
+            ### 验证
 
             ```bash
-            # 1. 验证文件完整性
-            sha256sum -c SHA256SUMS
+            # 1. 导入 CI 公钥
+            gpg --import gnupg-ci-release-key.asc
 
             # 2. 验证 SHA256SUMS 签名
-            gpg --import gnupg-ci-release-key.asc
             gpg --verify SHA256SUMS.sig SHA256SUMS
 
-            # 3. 查看构建清单
-            cat build-manifest.json
+            # 3. 验证文件完整性
+            sha256sum -c SHA256SUMS
 
-            # 4. SLSA Provenance 可在 GitHub Releases 页面查看
+            # 4. 查看构建清单
+            cat release-manifest.json
             ```
+
+            SLSA Provenance（构建来源证明）可在 GitHub Releases 页面查看。
 
             构建时间：${{ steps.release-info.outputs.build_date }}
 
@@ -813,51 +803,40 @@ jobs:
 
             ## English
 
-            Automatically built from the official GnuPG source via GitHub Actions. Source integrity verified with GnuPG official signature.
+            Source downloaded from gnupg.org, verified with official signature, and built automatically.
 
-            ## Integrity Verification
+            ### Release Assets
 
-            Each build artifact includes:
-            - **SHA256SUMS** — SHA-256 checksum manifest
-            - **build-manifest.json** — Build metadata (version, platform, config)
-            - **SLSA Provenance** — Build provenance attestation via `attest-build-provenance`
+            | File | Description |
+            |---|---|
+            | `SHA256SUMS` | SHA-256 checksum of all assets (signed) |
+            | `SHA256SUMS.sig` | GPG detached signature of SHA256SUMS |
+            | `gnupg-ci-release-key.asc` | CI signing public key (fingerprint: `1F3451...205CC1`) |
+            | `release-manifest.json` | Version, build date, asset list |
+            | `gnupg-linux-amd64.tar.xz` + `.deb` | Linux x86_64 static binaries |
+            | `gnupg-linux-arm64.tar.xz` + `.deb` | Linux ARM64 static binaries |
+            | `gnupg-windows-w64.zip` | Windows 64-bit (exe + DLL) |
+            | `gnupg-windows-w64-static.zip` | Windows 64-bit fully static (exe only) |
 
-            ### Included Files
-            - **gpg** — Core GnuPG encryption tool
-            - **gpg-agent** — GPG agent (private key cache)
-            - **gpgconf** — Configuration tool
-            - **gpgsm** — S/MIME support
-            - **gpgv** — Signature verification tool
-            - **gpgtar** — Encrypted archive tool
-            - **gpg-card** — OpenPGP card management
-            - **dirmngr** — Certificate directory manager
-            - **keyboxd** — Keybox daemon
-
-            ### Build Platforms
-            | File Name | Architecture | Type |
-            |---|---|---|
-            | gnupg-linux-amd64.tar.xz | Linux x86_64 | Static binary tar.xz |
-            | gnupg-linux-amd64.deb | Linux x86_64 | Debian/Ubuntu .deb package |
-            | gnupg-linux-arm64.tar.xz | Linux ARM64 | Static binary tar.xz |
-            | gnupg-linux-arm64.deb | Linux ARM64 | Debian/Ubuntu .deb package |
-            | gnupg-windows-w64.zip | Windows 64-bit | .exe + DLL |
-            | gnupg-windows-w64-static.zip | Windows 64-bit | Third-party dependencies statically linked (exe only) |
+            Each build artifact (`gnupg-*.tar.xz`/`.deb`/`.zip`) also includes its own `SHA256SUMS` and `build-manifest.json`.
 
             ### Verification
 
             ```bash
-            # 1. Verify file integrity
-            sha256sum -c SHA256SUMS
+            # 1. Import the CI public key
+            gpg --import gnupg-ci-release-key.asc
 
             # 2. Verify SHA256SUMS signature
-            gpg --import gnupg-ci-release-key.asc
             gpg --verify SHA256SUMS.sig SHA256SUMS
 
-            # 3. Inspect build manifest
-            cat build-manifest.json
+            # 3. Verify file integrity
+            sha256sum -c SHA256SUMS
 
-            # 4. SLSA Provenance available on GitHub Releases page
+            # 4. Inspect build manifest
+            cat release-manifest.json
             ```
+
+            SLSA Provenance (build attestation) is available on the GitHub Releases page.
 
             Build Date: ${{ steps.release-info.outputs.build_date }}
           artifacts: release-assets/*
