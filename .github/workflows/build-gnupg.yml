@@ -573,6 +573,7 @@ jobs:
               "sig_verified": true,
               "signing_key_fingerprint": "D8692123806F6B982AB1D1B604E4C4B34F25E3B6"
             },
+            "ci_release_signing_key_fingerprint": "1F3451478BEF3EB3B4A452BABA87D9453B205CC1",
             "build": {
               "platform": "${{ matrix.config.targetos }}",
               "arch": "${{ matrix.config.name }}",
@@ -684,6 +685,7 @@ jobs:
               "sig_verified": true,
               "signing_key_fingerprint": "D8692123806F6B982AB1D1B604E4C4B34F25E3B6"
             },
+            "ci_release_signing_key_fingerprint": "1F3451478BEF3EB3B4A452BABA87D9453B205CC1",
             "build_date": "${BUILD_DATE}",
             "repository": "${{ github.repository }}",
             "run_id": "${{ github.run_id }}",
@@ -724,8 +726,33 @@ jobs:
           # 复制总 SHA256SUMS 和 release manifest 到产物目录
           cp SHA256SUMS release-assets/
           cp release-manifest.json release-assets/
-          echo "Release 产物列表:"
-          ls -lh release-assets/
+
+      - name: 导入 CI 签名密钥并签名 Release 产物
+        env:
+          CI_GPG_PRIVATE_KEY: ${{ secrets.CI_GPG_PRIVATE_KEY }}
+        run: |
+          if [ -z "${CI_GPG_PRIVATE_KEY}" ]; then
+            echo "WARNING: 未配置 CI_GPG_PRIVATE_KEY secret, 跳过 Release 签名"
+          else
+            GNUPGHOME="${RUNNER_TEMP}/ci-gnupg-home"
+            mkdir -p -m 0700 "${GNUPGHOME}"
+            export GNUPGHOME
+
+            # 导入 CI 签名私钥
+            echo "${CI_GPG_PRIVATE_KEY}" | gpg --batch --import 2>&1 | head -n 5
+
+            # 对 SHA256SUMS 生成 detached 签名
+            echo "正在签名 SHA256SUMS..."
+            gpg --batch --armor --detach-sign \
+              --default-key "1F3451478BEF3EB3B4A452BABA87D9453B205CC1" \
+              --output release-assets/SHA256SUMS.sig \
+              release-assets/SHA256SUMS
+            echo "✓ SHA256SUMS.sig 已生成"
+
+            # 复制公钥到产物目录
+            cp "${GITHUB_WORKSPACE}/.github/gnupg-ci-release-key.asc" release-assets/
+            echo "✓ 公钥已复制到产物目录"
+          fi
 
       - name: 创建 GitHub Release
         uses: ncipollo/release-action@v1
@@ -770,10 +797,14 @@ jobs:
             # 1. 验证文件完整性
             sha256sum -c SHA256SUMS
 
-            # 2. 查看构建清单
+            # 2. 验证 SHA256SUMS 签名
+            gpg --import gnupg-ci-release-key.asc
+            gpg --verify SHA256SUMS.sig SHA256SUMS
+
+            # 3. 查看构建清单
             cat build-manifest.json
 
-            # 3. SLSA Provenance 可在 GitHub Releases 页面查看
+            # 4. SLSA Provenance 可在 GitHub Releases 页面查看
             ```
 
             构建时间：${{ steps.release-info.outputs.build_date }}
@@ -818,10 +849,14 @@ jobs:
             # 1. Verify file integrity
             sha256sum -c SHA256SUMS
 
-            # 2. Inspect build manifest
+            # 2. Verify SHA256SUMS signature
+            gpg --import gnupg-ci-release-key.asc
+            gpg --verify SHA256SUMS.sig SHA256SUMS
+
+            # 3. Inspect build manifest
             cat build-manifest.json
 
-            # 3. SLSA Provenance available on GitHub Releases page
+            # 4. SLSA Provenance available on GitHub Releases page
             ```
 
             Build Date: ${{ steps.release-info.outputs.build_date }}
